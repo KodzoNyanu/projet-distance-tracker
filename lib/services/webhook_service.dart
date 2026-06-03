@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:http/http.dart' as http;
 import '../models/session.dart';
 import '../models/location_point.dart';
@@ -89,15 +90,16 @@ class WebhookService {
     if (url.trim().isEmpty) return false;
     try {
       final uri = Uri.parse(url.trim());
+      final headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      };
+      final apiKey = dotenv.env['N8N_API_KEY'];
+      if (apiKey?.isNotEmpty ?? false) {
+        headers['X-N8N-API-KEY'] = apiKey!;
+      }
       final response = await http
-          .post(
-            uri,
-            headers: {
-              'Content-Type': 'application/json',
-              'Accept': 'application/json',
-            },
-            body: jsonEncode(payload),
-          )
+          .post(uri, headers: headers, body: jsonEncode(payload))
           .timeout(const Duration(seconds: 10));
       return response.statusCode >= 200 && response.statusCode < 300;
     } catch (_) {
