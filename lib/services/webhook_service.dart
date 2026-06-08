@@ -46,6 +46,7 @@ class WebhookService {
           'latitude': location.latitude,
           'longitude': location.longitude,
           'accuracy_meters': _round(location.accuracy, 1),
+          'timestamp': location.timestamp.toUtc().toIso8601String(),
         },
     };
   }

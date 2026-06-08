@@ -216,7 +216,7 @@ class TrackingProvider extends ChangeNotifier {
         LocationPoint(
           latitude: position.latitude,
           longitude: position.longitude,
-          timestamp: DateTime.now(),
+          timestamp: position.timestamp,
           speed: _currentSpeedMs,
           accuracy: position.accuracy,
         ),

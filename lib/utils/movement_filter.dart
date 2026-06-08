@@ -5,29 +5,27 @@ import 'haversine.dart';
 class MovementFilter {
   /// Maximum acceptable accuracy radius in metres.
   /// Points with worse accuracy are discarded.
-  static const double maxAccuracyMeters = 20.0;
+  static const double maxAccuracyMeters = 50.0;
 
   /// Speed threshold in m/s below which the user is considered stationary.
   /// Default: 0.55 m/s ≈ 2 km/h
   final double stationaryThresholdMs;
 
-  /// Minimum distance between consecutive accepted points.
-  /// Helps ignore GPS micro-jitter.
-  static const double minDistanceMeters = 3.0;
+  /// Absolute minimum distance between consecutive accepted points.
+  /// The effective minimum is max(minDistanceMeters, accuracy * accuracyScale)
+  /// so that noisier fixes require proportionally larger movement before
+  /// contributing to the total, preventing GPS jitter inflation.
+  static const double minDistanceMeters = 2.0;
+  static const double accuracyScale = 0.5;
 
   /// Minimum elapsed time before low reported speed can be overridden by
   /// coordinate movement. This rejects one-off GPS jumps while stationary.
-  static const int minCalculatedSpeedSeconds = 2;
-
-  /// Minimum cumulative distance before low-speed coordinate movement is
-  /// trusted. Reported speed can bypass this when GPS clearly detects motion.
-  static const double minSustainedDistanceMeters = 6.0;
+  static const int minCalculatedSpeedSeconds = 1;
 
   /// Number of consecutive stationary readings before auto-pause is triggered.
   static const int autoPauseAfterCount = 6;
 
   int _consecutiveStationaryReadings = 0;
-  Position? _lowSpeedMovementCandidate;
 
   MovementFilter({this.stationaryThresholdMs = 0.55});
 
@@ -54,8 +52,11 @@ class MovementFilter {
       position.longitude,
     );
 
-    if (distance < minDistanceMeters) {
-      _lowSpeedMovementCandidate = null;
+    final effectiveMin = position.accuracy * accuracyScale > minDistanceMeters
+        ? position.accuracy * accuracyScale
+        : minDistanceMeters;
+
+    if (distance < effectiveMin) {
       if (position.speed >= 0 && position.speed < stationaryThresholdMs) {
         _consecutiveStationaryReadings++;
       }
@@ -68,43 +69,17 @@ class MovementFilter {
     final calculatedSpeed = speedBetween(position, lastPosition, distance);
 
     if (hasMovingSpeed || speedUnavailable) {
-      _lowSpeedMovementCandidate = null;
       _consecutiveStationaryReadings = 0;
       return true;
     }
 
-    if (calculatedSpeed < stationaryThresholdMs) {
-      _lowSpeedMovementCandidate = null;
-      _consecutiveStationaryReadings++;
-      return false;
-    }
-
-    final candidate = _lowSpeedMovementCandidate;
-    if (candidate == null) {
-      _lowSpeedMovementCandidate = position;
-      return false;
-    }
-
-    final candidateDistance = haversineDistance(
-      candidate.latitude,
-      candidate.longitude,
-      position.latitude,
-      position.longitude,
-    );
-    final requiredDistance = position.accuracy > minSustainedDistanceMeters
-        ? position.accuracy
-        : minSustainedDistanceMeters;
-
-    // Distance alone is not enough: GPS jitter can drift several metres while
-    // stationary. Reported speed can also lag while walking, so fall back to
-    // coordinate speed once enough time has elapsed to avoid one-off jumps.
-    if (candidateDistance >= minDistanceMeters &&
-        distance >= requiredDistance) {
-      _lowSpeedMovementCandidate = null;
+    // GPS speed is low — fall back to coordinate-derived speed.
+    if (calculatedSpeed >= stationaryThresholdMs) {
       _consecutiveStationaryReadings = 0;
       return true;
     }
 
+    // Both GPS speed and coordinate movement indicate stationary.
     _consecutiveStationaryReadings++;
     return false;
   }
@@ -134,6 +109,5 @@ class MovementFilter {
   /// Reset the counter (e.g. when user resumes or stops).
   void reset() {
     _consecutiveStationaryReadings = 0;
-    _lowSpeedMovementCandidate = null;
   }
 }
