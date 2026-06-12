@@ -3,20 +3,27 @@ import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import '../models/session.dart';
 import '../models/location_point.dart';
+import '../services/activity_service.dart';
 import '../services/location_service.dart';
 import '../services/background_service.dart';
 import '../services/storage_service.dart';
+import '../services/trace_recorder_service.dart';
 import '../services/webhook_service.dart';
 import '../providers/settings_provider.dart';
-import '../utils/haversine.dart';
-import '../utils/movement_filter.dart';
+import '../utils/distance_pipeline.dart';
+import '../utils/filter_profiles.dart';
 import '../utils/formatters.dart';
 
 enum TrackingState { idle, tracking, autoPaused, stopped }
 
 class TrackingProvider extends ChangeNotifier {
   final LocationService _locationService = LocationService();
-  late MovementFilter _filter;
+  final TraceRecorderService _traceRecorder = TraceRecorderService();
+  final SpeedModeHeuristic _speedHeuristic = SpeedModeHeuristic();
+  DistancePipeline _pipeline = DistancePipeline();
+  ActivityService? _activityService;
+  StreamSubscription<ActivityMode>? _activitySub;
+  ActivityMode? _recognizedMode;
 
   TrackingState _state = TrackingState.idle;
   double _distanceMeters = 0.0;
@@ -24,8 +31,8 @@ class TrackingProvider extends ChangeNotifier {
   double _maxSpeedMs = 0.0;
   double _totalSpeedSum = 0.0;
   int _speedReadings = 0;
+  int _consecutiveAccepted = 0;
   int _activeSeconds = 0;
-  Position? _lastPosition;
   Session? _currentSession;
   Timer? _elapsedTimer;
   StreamSubscription<Position>? _positionSub;
@@ -34,6 +41,9 @@ class TrackingProvider extends ChangeNotifier {
   // User-configurable auto-pause threshold in m/s
   double _autoPauseThresholdMs = 0.55; // ≈ 2 km/h
   bool _autoPauseEnabled = false;
+  bool _traceRecordingEnabled = false;
+  bool _activityRecognitionEnabled = true;
+  DisplacementMode _displacementMode = DisplacementMode.auto;
 
   // Unit preference (injected by SettingsProvider or Settings screen)
   bool useImperial = false;
@@ -71,18 +81,30 @@ class TrackingProvider extends ChangeNotifier {
     useImperial = settings.useImperial;
     _autoPauseEnabled = settings.autoPauseEnabled;
     _autoPauseThresholdMs = settings.autoPauseThresholdMs;
+    _traceRecordingEnabled = settings.traceRecordingEnabled;
+    _activityRecognitionEnabled = settings.activityRecognitionEnabled;
+    _displacementMode = settings.displacementMode;
     _webhookUrl = settings.webhookUrl;
     _realtimeWebhookEnabled = settings.realtimeWebhookEnabled;
     _webhookIntervalSeconds = settings.webhookIntervalSeconds;
     _postSessionOnComplete = settings.postSessionOnComplete;
-    // Rebuild filter in case threshold changed
-    _filter = MovementFilter(stationaryThresholdMs: _autoPauseThresholdMs);
+    // Rebuild the pipeline only if the threshold changed — recreating it
+    // unconditionally would wipe its movement state mid-session.
+    if (_pipeline.stationaryThresholdMs != _autoPauseThresholdMs) {
+      _pipeline = DistancePipeline(
+        stationaryThresholdMs: _autoPauseThresholdMs,
+      );
+    }
   }
 
   /// Updates auto-pause speed threshold (in m/s).
   void setAutoPauseThreshold(double thresholdMs) {
     _autoPauseThresholdMs = thresholdMs;
-    _filter = MovementFilter(stationaryThresholdMs: _autoPauseThresholdMs);
+    if (_pipeline.stationaryThresholdMs != _autoPauseThresholdMs) {
+      _pipeline = DistancePipeline(
+        stationaryThresholdMs: _autoPauseThresholdMs,
+      );
+    }
     notifyListeners();
   }
 
@@ -90,7 +112,9 @@ class TrackingProvider extends ChangeNotifier {
   Future<void> startSession() async {
     _clearError();
     _resetState();
-    _filter = MovementFilter(stationaryThresholdMs: _autoPauseThresholdMs);
+    _pipeline = DistancePipeline(
+      stationaryThresholdMs: _autoPauseThresholdMs,
+    );
 
     final sessionId = DateTime.now().millisecondsSinceEpoch.toString();
     _currentSession = Session(id: sessionId, startTime: DateTime.now());
@@ -100,6 +124,35 @@ class TrackingProvider extends ChangeNotifier {
     } on LocationServiceException catch (e) {
       _setError(e.message);
       return;
+    }
+
+    if (_traceRecordingEnabled) {
+      await _traceRecorder.start(sessionId, _currentSession!.startTime);
+    }
+
+    _speedHeuristic.reset();
+    _recognizedMode = null;
+    // A manual mode pins its profile from the very first fix — no waiting
+    // for the recognizer to warm up, which is what made short on-foot trips
+    // start on the wrong profile.
+    _applyEffectiveProfile();
+
+    // Only run the recognizer in Auto; a manual lock ignores its output, so
+    // subscribing would just waste battery. The speed safety net stays live
+    // either way (it is driven by incoming fixes, not this service).
+    if (_displacementMode == DisplacementMode.auto &&
+        _activityRecognitionEnabled) {
+      final service = ActivityService();
+      _activityService = service;
+      // Permission denial or plugin failure is non-blocking: the pipeline
+      // stays on the default profile and the speed heuristic still works.
+      unawaited(
+        service.start().then((available) {
+          if (available && _activityService == service) {
+            _activitySub = service.modeStream.listen(_onActivityMode);
+          }
+        }),
+      );
     }
 
     _state = TrackingState.tracking;
@@ -139,9 +192,17 @@ class TrackingProvider extends ChangeNotifier {
     _state = TrackingState.stopped;
     _stopElapsedTimer();
     await _positionSub?.cancel();
+    await _activitySub?.cancel();
+    _activitySub = null;
+    await _activityService?.stop();
+    _activityService = null;
     await _locationService.stopTracking();
     await BackgroundService.stop();
-    _filter.reset();
+    await _traceRecorder.stop();
+    // Credit the last accepted delta still held in the one-fix
+    // confirmation window before discarding filter state.
+    _distanceMeters += _pipeline.flush();
+    _pipeline.reset();
 
     if (_currentSession != null) {
       _currentSession!.endTime = DateTime.now();
@@ -175,54 +236,68 @@ class TrackingProvider extends ChangeNotifier {
 
   // ── Internal helpers ──────────────────────────────────────────────────────
 
-  void _onPosition(Position position) {
-    final valid = _filter.isValidMovement(position, _lastPosition);
+  void _onActivityMode(ActivityMode mode) {
+    _recognizedMode = mode;
+    _applyEffectiveProfile();
+  }
 
-    if (valid) {
+  /// Resolves and applies the active profile from the manual lock, the
+  /// recognized mode, and the speed safety net. See [resolveActiveProfile].
+  void _applyEffectiveProfile() {
+    _pipeline.updateProfile(
+      resolveActiveProfile(
+        forcingVehicle: _speedHeuristic.forcingVehicle,
+        manualMode: _displacementMode.activityMode,
+        recognizedMode: _recognizedMode,
+      ),
+    );
+  }
+
+  void _onPosition(Position position) {
+    // Tee the raw fix before any filtering so traces capture exactly what
+    // the GPS delivered, not what survived the pipeline.
+    _traceRecorder.record(position);
+
+    final result = _pipeline.process(position);
+
+    if (_speedHeuristic.update(
+      result.speedMs ?? _currentSpeedMs,
+      position.timestamp,
+    )) {
+      _applyEffectiveProfile();
+    }
+
+    if (result.accepted) {
       if (_state == TrackingState.autoPaused) {
         // Resume
         _state = TrackingState.tracking;
         _startElapsedTimer();
-        _filter.reset();
       }
 
-      var delta = 0.0;
-      if (_lastPosition != null) {
-        delta = haversineDistance(
-          _lastPosition!.latitude,
-          _lastPosition!.longitude,
-          position.latitude,
-          position.longitude,
-        );
-        _distanceMeters += delta;
+      _distanceMeters += result.deltaMeters;
+      _currentSpeedMs = result.speedMs ?? _currentSpeedMs;
+      // Max speed only updates when at least two consecutive accepted fixes
+      // support it — a single glitched fix must not set the session record.
+      _consecutiveAccepted++;
+      if (_consecutiveAccepted >= 2 && _currentSpeedMs > _maxSpeedMs) {
+        _maxSpeedMs = _currentSpeedMs;
       }
-
-      final reportedSpeedMs = position.speed >= 0 ? position.speed : 0.0;
-      final calculatedSpeedMs = _filter.speedBetween(
-        position,
-        _lastPosition,
-        delta,
-      );
-      _currentSpeedMs = calculatedSpeedMs > reportedSpeedMs
-          ? calculatedSpeedMs
-          : reportedSpeedMs;
-      if (_currentSpeedMs > _maxSpeedMs) _maxSpeedMs = _currentSpeedMs;
       if (_currentSpeedMs > 0) {
         _totalSpeedSum += _currentSpeedMs;
         _speedReadings++;
       }
 
+      // Store the smoothed fix — it is the better path estimate.
+      final smoothed = result.smoothed;
       _currentSession?.locationPoints.add(
         LocationPoint(
-          latitude: position.latitude,
-          longitude: position.longitude,
-          timestamp: position.timestamp,
+          latitude: smoothed.latitude,
+          longitude: smoothed.longitude,
+          timestamp: smoothed.timestamp,
           speed: _currentSpeedMs,
-          accuracy: position.accuracy,
+          accuracy: smoothed.accuracy,
         ),
       );
-
-      _lastPosition = position;
 
       // Real-time webhook: throttled by webhookIntervalSeconds
       if (_realtimeWebhookEnabled &&
@@ -254,12 +329,13 @@ class TrackingProvider extends ChangeNotifier {
       BackgroundService.update(distanceText: _notificationText());
       _persistCurrentSession();
     } else {
-      if (position.speed >= 0) {
-        _currentSpeedMs = position.speed;
+      _consecutiveAccepted = 0;
+      if (result.speedMs != null) {
+        _currentSpeedMs = result.speedMs!;
       }
 
       if (_autoPauseEnabled &&
-          _filter.shouldAutoPause &&
+          _pipeline.shouldAutoPause &&
           _state == TrackingState.tracking) {
         _state = TrackingState.autoPaused;
         _currentSpeedMs = 0.0;
@@ -292,8 +368,8 @@ class TrackingProvider extends ChangeNotifier {
     _maxSpeedMs = 0.0;
     _totalSpeedSum = 0.0;
     _speedReadings = 0;
+    _consecutiveAccepted = 0;
     _activeSeconds = 0;
-    _lastPosition = null;
     _currentSession = null;
     _errorMessage = null;
     _lastSessionPersist = null;
@@ -337,6 +413,9 @@ class TrackingProvider extends ChangeNotifier {
   void dispose() {
     _stopElapsedTimer();
     _positionSub?.cancel();
+    _activitySub?.cancel();
+    _activityService?.dispose();
+    _traceRecorder.stop();
     _locationService.dispose();
     super.dispose();
   }

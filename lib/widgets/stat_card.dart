@@ -21,7 +21,7 @@ class StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final accent = accentColor ?? Theme.of(context).colorScheme.primary;
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+      padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
         color: const Color(0xFF1E272E),
         borderRadius: BorderRadius.circular(16),

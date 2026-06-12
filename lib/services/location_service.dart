@@ -1,14 +1,30 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 import 'package:geolocator/geolocator.dart';
 import '../l10n/app_localizations.dart';
 
 /// Wraps the geolocator plugin and handles permission checks.
 /// Emits a stream of [Position] objects for the caller to consume.
 class LocationService {
-  static const LocationSettings _locationSettings = LocationSettings(
-    accuracy: LocationAccuracy.bestForNavigation,
-    distanceFilter: 0, // We do our own filtering
-  );
+  /// Platform-specific settings.
+  /// iOS: ActivityType.fitness stops the OS from zeroing speed during warm-up.
+  /// Android: explicit 1 s interval ensures consistent update cadence.
+  static LocationSettings get _locationSettings {
+    if (Platform.isIOS || Platform.isMacOS) {
+      return AppleSettings(
+        accuracy: LocationAccuracy.bestForNavigation,
+        activityType: ActivityType.fitness,
+        distanceFilter: 0,
+        pauseLocationUpdatesAutomatically: false,
+        allowBackgroundLocationUpdates: true,
+      );
+    }
+    return AndroidSettings(
+      accuracy: LocationAccuracy.bestForNavigation,
+      distanceFilter: 0,
+      intervalDuration: const Duration(seconds: 1),
+    );
+  }
 
   StreamSubscription<Position>? _subscription;
   final StreamController<Position> _controller =

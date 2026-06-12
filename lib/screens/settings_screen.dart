@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import '../l10n/app_localizations.dart';
 import '../providers/settings_provider.dart';
 import '../providers/tracking_provider.dart';
+import '../services/trace_recorder_service.dart';
 import '../services/webhook_service.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -251,6 +252,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 loading: _testingWebhook,
                 result: _testResult,
                 onPressed: () => _testWebhook(settings),
+              ),
+
+              const SizedBox(height: 24),
+              _SectionHeader(label: l10n.accuracy),
+              const SizedBox(height: 10),
+              _SettingsTile(
+                title: l10n.activityRecognition,
+                subtitle: l10n.activityRecognitionSubtitle,
+                trailing: Switch(
+                  value: settings.activityRecognitionEnabled,
+                  activeThumbColor: const Color(0xFF00E5FF),
+                  activeTrackColor: const Color(0xFF00E5FF).withAlpha(128),
+                  onChanged: (v) => settings.setActivityRecognitionEnabled(v),
+                ),
+              ),
+
+              const SizedBox(height: 24),
+              _SectionHeader(label: l10n.diagnostics),
+              const SizedBox(height: 10),
+              _SettingsTile(
+                title: l10n.traceRecording,
+                subtitle: l10n.traceRecordingSubtitle,
+                trailing: Switch(
+                  value: settings.traceRecordingEnabled,
+                  activeThumbColor: const Color(0xFF00E5FF),
+                  activeTrackColor: const Color(0xFF00E5FF).withAlpha(128),
+                  onChanged: (v) => settings.setTraceRecordingEnabled(v),
+                ),
+              ),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton.icon(
+                  onPressed: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final emptyMessage = l10n.noTracesToExport;
+                    final shared = await TraceRecorderService.exportAll();
+                    if (!shared) {
+                      messenger.showSnackBar(
+                        SnackBar(content: Text(emptyMessage)),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.ios_share_outlined, size: 16),
+                  label: Text(l10n.exportTraces),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: const Color(0xFF00E5FF),
+                    side: const BorderSide(color: Color(0xFF00E5FF)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
               ),
 
               const SizedBox(height: 24),

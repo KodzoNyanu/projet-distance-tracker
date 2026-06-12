@@ -129,6 +129,30 @@ class AppLocalizations {
       ? 'Les mesures avec une precision superieure a 50 m sont ignorees automatiquement.'
       : 'Readings with accuracy worse than 50 m are discarded automatically.';
 
+  String get movementMode => _fr ? 'Mode de deplacement' : 'Movement mode';
+  String get modeAuto => _fr ? 'Auto' : 'Auto';
+  String get modeWalking => _fr ? 'Marche' : 'Walk';
+  String get modeCycling => _fr ? 'Velo' : 'Bike';
+  String get modeVehicle => _fr ? 'Vehicule' : 'Car';
+
+  String get accuracy => _fr ? 'Precision' : 'Accuracy';
+  String get activityRecognition =>
+      _fr ? 'Detection d\'activite' : 'Activity detection';
+  String get activityRecognitionSubtitle => _fr
+      ? 'Utilise les capteurs de mouvement pour distinguer marche, velo et vehicule et adapter automatiquement le filtre GPS.'
+      : 'Uses motion sensors to tell walking, cycling, and driving apart and tune the GPS filter automatically.';
+
+  String get diagnostics => _fr ? 'Diagnostics' : 'Diagnostics';
+  String get traceRecording =>
+      _fr ? 'Enregistrer les traces GPS brutes' : 'Record raw GPS traces';
+  String get traceRecordingSubtitle => _fr
+      ? 'Sauvegarde chaque mesure GPS brute de la session pour analyser et ameliorer la precision. Les 20 dernieres sessions sont conservees.'
+      : 'Saves every raw GPS reading of the session to analyse and improve accuracy. The last 20 sessions are kept.';
+  String get exportTraces =>
+      _fr ? 'Exporter les traces GPS' : 'Export GPS traces';
+  String get noTracesToExport =>
+      _fr ? 'Aucune trace a exporter.' : 'No traces to export.';
+
   String get sessionDetails =>
       _fr ? 'Details de la session' : 'Session Details';
   String get exportSession => _fr ? 'Exporter la session' : 'Export session';

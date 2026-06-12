@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import '../utils/filter_profiles.dart';
 
 class SettingsProvider extends ChangeNotifier {
   static const _boxName = 'settings';
@@ -11,6 +12,9 @@ class SettingsProvider extends ChangeNotifier {
   static const _keyWebhookInterval = 'webhook_interval_seconds';
   static const _keyPostOnComplete = 'post_session_on_complete';
   static const _keyLanguage = 'language_code';
+  static const _keyTraceRecording = 'trace_recording_enabled';
+  static const _keyActivityRecognition = 'activity_recognition_enabled';
+  static const _keyDisplacementMode = 'displacement_mode';
 
   bool _useImperial = false;
   bool _autoPauseEnabled = false;
@@ -23,6 +27,13 @@ class SettingsProvider extends ChangeNotifier {
   int _webhookIntervalSeconds = 5;
   bool _postSessionOnComplete = true;
 
+  // ── Diagnostics ────────────────────────────────────────────────────────
+  bool _traceRecordingEnabled = false;
+
+  // ── Accuracy ───────────────────────────────────────────────────────────
+  bool _activityRecognitionEnabled = true;
+  DisplacementMode _displacementMode = DisplacementMode.auto;
+
   bool get useImperial => _useImperial;
   bool get autoPauseEnabled => _autoPauseEnabled;
   String get languageCode => _languageCode;
@@ -33,6 +44,9 @@ class SettingsProvider extends ChangeNotifier {
   bool get realtimeWebhookEnabled => _realtimeWebhookEnabled;
   int get webhookIntervalSeconds => _webhookIntervalSeconds;
   bool get postSessionOnComplete => _postSessionOnComplete;
+  bool get traceRecordingEnabled => _traceRecordingEnabled;
+  bool get activityRecognitionEnabled => _activityRecognitionEnabled;
+  DisplacementMode get displacementMode => _displacementMode;
 
   static Future<void> openBox() async {
     await Hive.openBox(_boxName);
@@ -53,6 +67,13 @@ class SettingsProvider extends ChangeNotifier {
     _postSessionOnComplete =
         box.get(_keyPostOnComplete, defaultValue: true) as bool;
     _languageCode = box.get(_keyLanguage, defaultValue: 'fr') as String;
+    _traceRecordingEnabled =
+        box.get(_keyTraceRecording, defaultValue: false) as bool;
+    _activityRecognitionEnabled =
+        box.get(_keyActivityRecognition, defaultValue: true) as bool;
+    _displacementMode = DisplacementModeX.parse(
+      box.get(_keyDisplacementMode) as String?,
+    );
     notifyListeners();
   }
 
@@ -95,6 +116,24 @@ class SettingsProvider extends ChangeNotifier {
   Future<void> setPostSessionOnComplete(bool value) async {
     _postSessionOnComplete = value;
     await Hive.box(_boxName).put(_keyPostOnComplete, value);
+    notifyListeners();
+  }
+
+  Future<void> setTraceRecordingEnabled(bool value) async {
+    _traceRecordingEnabled = value;
+    await Hive.box(_boxName).put(_keyTraceRecording, value);
+    notifyListeners();
+  }
+
+  Future<void> setActivityRecognitionEnabled(bool value) async {
+    _activityRecognitionEnabled = value;
+    await Hive.box(_boxName).put(_keyActivityRecognition, value);
+    notifyListeners();
+  }
+
+  Future<void> setDisplacementMode(DisplacementMode value) async {
+    _displacementMode = value;
+    await Hive.box(_boxName).put(_keyDisplacementMode, value.name);
     notifyListeners();
   }
 

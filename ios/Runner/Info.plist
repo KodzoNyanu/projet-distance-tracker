@@ -54,6 +54,10 @@
 	<key>NSLocationAlwaysUsageDescription</key>
 	<string>Kodzo Kilometrage a besoin de la position en arriere-plan pour continuer le suivi lorsque l'app n'est pas visible.</string>
 
+	<!-- Motion usage: activity recognition for filter profile switching -->
+	<key>NSMotionUsageDescription</key>
+	<string>Kodzo Kilometrage utilise les capteurs de mouvement pour distinguer marche et vehicule et ameliorer la precision de la distance.</string>
+
 	<!-- Background modes: location -->
 	<key>UIBackgroundModes</key>
 	<array>

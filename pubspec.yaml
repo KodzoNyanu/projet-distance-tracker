@@ -2,7 +2,7 @@ name: distance_tracker
 description: "Virtual distance sensor — GPS-based distance tracker."
 publish_to: "none"
 
-version: 1.0.0+6
+version: 1.0.0+7
 
 environment:
   sdk: ^3.10.4
@@ -21,6 +21,9 @@ dependencies:
 
   # Background service (Android foreground service)
   flutter_foreground_task: ^8.14.0
+
+  # Activity recognition (walking / cycling / vehicle profile switching)
+  flutter_activity_recognition: ^4.0.0
 
   # Local storage
   hive: ^2.2.3

@@ -4,6 +4,7 @@ import '../l10n/app_localizations.dart';
 import '../providers/history_provider.dart';
 import '../providers/tracking_provider.dart';
 import '../providers/settings_provider.dart';
+import '../utils/filter_profiles.dart';
 import '../utils/formatters.dart';
 import '../widgets/distance_gauge.dart';
 import '../widgets/stat_card.dart';
@@ -107,6 +108,12 @@ class HomeScreen extends StatelessWidget {
 
                   const SizedBox(height: 20),
 
+                  // ── Movement mode (idle only) ──────────────────────────
+                  if (tracker.isIdle) ...[
+                    _ModePicker(settings: settings),
+                    const SizedBox(height: 16),
+                  ],
+
                   // ── Control Button ─────────────────────────────────────
                   _ControlButton(tracker: tracker, settings: settings),
 
@@ -134,6 +141,108 @@ class HomeScreen extends StatelessWidget {
   String _speedValue(double speedMs, bool imperial) {
     if (imperial) return (speedMs * 2.23694).toStringAsFixed(1);
     return (speedMs * 3.6).toStringAsFixed(1);
+  }
+}
+
+class _ModePicker extends StatelessWidget {
+  final SettingsProvider settings;
+
+  const _ModePicker({required this.settings});
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = context.l10n;
+    final options = <(DisplacementMode, IconData, String)>[
+      (DisplacementMode.auto, Icons.auto_mode, l10n.modeAuto),
+      (DisplacementMode.walking, Icons.directions_walk, l10n.modeWalking),
+      (DisplacementMode.cycling, Icons.directions_bike, l10n.modeCycling),
+      (DisplacementMode.vehicle, Icons.directions_car, l10n.modeVehicle),
+    ];
+    final selected = settings.displacementMode;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          l10n.movementMode.toUpperCase(),
+          style: const TextStyle(
+            color: Colors.white38,
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            letterSpacing: 1.2,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            for (final (mode, icon, label) in options) ...[
+              Expanded(
+                child: _ModeChip(
+                  icon: icon,
+                  label: label,
+                  selected: mode == selected,
+                  onTap: () => settings.setDisplacementMode(mode),
+                ),
+              ),
+              if (mode != options.last.$1) const SizedBox(width: 8),
+            ],
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _ModeChip extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ModeChip({
+    required this.icon,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    const accent = Color(0xFF00E5FF);
+    final fg = selected ? accent : Colors.white54;
+    return Material(
+      color: selected ? accent.withAlpha(26) : const Color(0xFF1E272E),
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: selected ? accent.withAlpha(128) : Colors.transparent,
+            ),
+          ),
+          child: Column(
+            children: [
+              Icon(icon, color: fg, size: 22),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  color: fg,
+                  fontSize: 11,
+                  fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
